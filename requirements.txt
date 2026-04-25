@@ -1,0 +1,8 @@
+streamlit
+pandas
+aiohttp
+beautifulsoup4
+playwright
+playwright-stealth
+xlsxwriter
+nest_asyncio
