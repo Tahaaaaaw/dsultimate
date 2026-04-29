@@ -17,7 +17,7 @@ except ImportError:
     st.error("Playwright missing. Install: pip install playwright && playwright install chromium")
 
 from config import (
-    FILTER_WEIGHTS, build_word_boundary_regex, PHONE_PATTERN,
+    FILTER_WEIGHTS, build_word_boundary_regex, build_pool_keyword_regex, PHONE_PATTERN,
     SOCIAL_DOMAINS
 )
 from utils import get_random_headers, clean_social_url, identify_platform
@@ -28,7 +28,7 @@ from database import get_cached_result, save_to_cache
 # ==========================================
 class ScoringEngine:
     def __init__(self, config_data: Dict[str, list]):
-        self.re_pool = build_word_boundary_regex(config_data.get('pool', []))
+        self.re_pool = build_pool_keyword_regex(config_data.get('pool', []))
         self.re_commercial = build_word_boundary_regex(config_data.get('commercial', []))
         self.re_owner = build_word_boundary_regex(config_data.get('owner', []))
         self.re_general = build_word_boundary_regex(config_data.get('general', []))

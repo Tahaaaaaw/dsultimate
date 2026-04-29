@@ -143,12 +143,15 @@ def render_scraper_view():
         else:
             up = st.file_uploader("Upload CSV", type=['csv'], key="sc_up")
             if up:
-                df = pd.read_csv(up)
+                has_header = st.checkbox("CSV has a header row", value=True, key="sc_has_header")
+                df = pd.read_csv(up, header=0 if has_header else None)
+                if not has_header:
+                    df.columns = [f"Column {i+1}" for i in range(len(df.columns))]
                 st.dataframe(df.head(3))
                 ncol, ucol = None, None
                 for c in df.columns:
-                    if any(x in c.lower() for x in ['name', 'company']) and not ncol: ncol = c
-                    if any(x in c.lower() for x in ['url', 'web', 'site']) and not ucol: ucol = c
+                    if any(x in str(c).lower() for x in ['name', 'company']) and not ncol: ncol = c
+                    if any(x in str(c).lower() for x in ['url', 'web', 'site']) and not ucol: ucol = c
                 sel_n = st.selectbox("Name Col:", df.columns, index=list(df.columns).index(ncol) if ncol else 0)
                 sel_u = st.selectbox("URL Col:", df.columns, index=list(df.columns).index(ucol) if ucol else 0)
                 if st.button("Prepare List"):
@@ -214,7 +217,6 @@ def render_scraper_view():
 # ==========================================
 # 3. VIEW: LEAD FILTERING (NLP REGEX)
 # ==========================================
-def df_to_tsv(df): return df.to_csv(sep='\t', index=False)
 
 def render_filter_view():
     init_filter_db()
@@ -244,7 +246,8 @@ def render_filter_view():
 
     fls = st.file_uploader("Upload Scraped CSVs", type=['csv'], accept_multiple_files=True)
     if fls:
-        sm, _ = safe_read_csv(fls[0])
+        has_header = st.checkbox("CSVs have a header row", value=True, key="fs_has_header")
+        sm, _ = safe_read_csv(fls[0], has_header)
         if sm is not None:
             cols = sm.columns.tolist()
             ucol = st.selectbox("Username Col", cols, index=smart_find_column(cols, "username"))
@@ -255,7 +258,7 @@ def render_filter_view():
                 apth, afail, stats = [], [], []
                 pb = st.progress(0)
                 for i, f in enumerate(fls):
-                    df, _ = safe_read_csv(f)
+                    df, _ = safe_read_csv(f, has_header)
                     if df is not None:
                         df = df.apply(lambda r: engine.process_row(r, ucol, bcol), axis=1)
                         msk = df['smart_score'] >= min_s
@@ -293,6 +296,34 @@ def render_filter_view():
         m2.metric("❌ Filtered Out", len(failed))
         m3.metric("📊 Files Scanned", len(res['stats']))
         
+        # --- MASTER EXCEL EXPORT ---
+        try:
+            import io
+            import pandas as pd
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                if not passed.empty:
+                    passed.to_excel(writer, sheet_name='All Qualified Leads', index=False)
+                    for val in passed['Lead Type'].unique():
+                        safe_val = str(val).replace(':', '').replace('/', '-').replace('🏢', '').replace('👔', '').replace('👷', '').strip()
+                        if not safe_val: safe_val = "Sheet"
+                        passed[passed['Lead Type'] == val].to_excel(writer, sheet_name=safe_val[:31], index=False)
+                if not failed.empty:
+                    failed.to_excel(writer, sheet_name='Filtered Out', index=False)
+            
+            st.download_button(
+                label="📥 Download Master Excel (All Tabs & Data)",
+                data=output.getvalue(),
+                file_name="master_leads_export.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                type="primary",
+                use_container_width=True
+            )
+        except Exception as e:
+            st.error(f"Excel export unavailable (please install openpyxl): {e}")
+        st.markdown("<br>", unsafe_allow_html=True)
+        # ---------------------------
+        
         tab1, tab2, tab3 = st.tabs(["🎯 Qualified Leads", "📁 File Stats", "🗑️ Filtered Out"])
         
         with tab1:
@@ -308,26 +339,38 @@ def render_filter_view():
                     if df.empty:
                         st.info(f"No leads in {name}.")
                     else:
-                        # Split view for Bulk Copy side-panel
-                        table_col, copy_col = st.columns([4, 1.2])
+                        extra_cols = [c for c in df.columns if c not in [res['u_col'], res['b_col'], 'smart_score', 'source_file', 'Lead Type', 'fail_reason']]
                         
-                        with table_col:
-                            st.dataframe(
-                                df[[res['u_col'], res['b_col'], 'smart_score', 'source_file']],
-                                use_container_width=True,
-                                column_config={"smart_score": st.column_config.ProgressColumn("Score", format="%d", min_value=0, max_value=100)}
-                            )
+                        disp_cols = [res['u_col'], res['b_col']] + extra_cols + ['smart_score', 'source_file']
+                        disp_cols = [c for c in disp_cols if c in df.columns]
                         
-                        with copy_col:
-                            st.markdown("##### 📋 Bulk Extraction")
+                        st.dataframe(
+                            df[disp_cols],
+                            use_container_width=True,
+                            column_config={"smart_score": st.column_config.ProgressColumn("Score", format="%d", min_value=0, max_value=100)}
+                        )
+                        
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        col_exp, col_copy = st.columns(2)
+                        
+                        with col_exp:
+                            st.markdown("##### 📋 Export CSV Options")
+                            st.download_button(f"📥 Export Full Data", df.to_csv(index=False).encode('utf-8'), f"{name}_full.csv", mime="text/csv", key=f"csv_f_{name}")
+                            if res['u_col'] in df.columns:
+                                st.download_button(f"📥 Export Usernames", df[[res['u_col']]].to_csv(index=False).encode('utf-8'), f"{name}_usernames.csv", mime="text/csv", key=f"csv_u_{name}")
+                            if res['b_col'] in df.columns:
+                                st.download_button(f"📥 Export Bios", df[[res['b_col']]].to_csv(index=False).encode('utf-8'), f"{name}_bios.csv", mime="text/csv", key=f"csv_b_{name}")
+                        
+                        with col_copy:
+                            st.markdown("##### 📋 Copy to Clipboard")
                             if st.button(f"Get Usernames", key=f"btn_u_{name}"):
                                 st.text_area("All Usernames (Ctrl+A to Copy)", "\n".join(df[res['u_col']].astype(str)), height=150)
                             
                             if st.button(f"Get All Bios", key=f"btn_b_{name}"):
                                 st.text_area("All Bios (Ctrl+A to Copy)", "\n".join(df[res['b_col']].astype(str)), height=150)
-                            
-                            st.divider()
-                            st.download_button(f"📥 Export Full TSV", df_to_tsv(df), f"{name}.tsv")
+                                
+                            if st.button(f"Get Google Sheets Format (TSV)", key=f"btn_tsv_{name}"):
+                                st.text_area("Full Data (Ctrl+A, Ctrl+C, then Paste into Google Sheets)", df.to_csv(index=False, sep='\t'), height=150)
             
             for val, target_tab in categories:
                 render_lead_table(passed[passed['Lead Type'] == val], target_tab, val)
@@ -336,8 +379,23 @@ def render_filter_view():
         with tab2: st.dataframe(pd.DataFrame(res['stats']), use_container_width=True)
         with tab3:
             if not failed.empty:
-                st.dataframe(failed[[res['u_col'], res['b_col'], 'fail_reason', 'smart_score']], use_container_width=True)
-                st.download_button("📥 Copy Rejected (TSV)", df_to_tsv(failed), "rejected.tsv", mime='text/tab-separated-values')
+                extra_cols_failed = [c for c in failed.columns if c not in [res['u_col'], res['b_col'], 'smart_score', 'source_file', 'Lead Type', 'fail_reason']]
+                disp_cols_failed = [res['u_col'], res['b_col']] + extra_cols_failed + ['fail_reason', 'smart_score', 'source_file']
+                disp_cols_failed = [c for c in disp_cols_failed if c in failed.columns]
+                
+                st.dataframe(failed[disp_cols_failed], use_container_width=True)
+                
+                st.markdown("<br>", unsafe_allow_html=True)
+                cf_exp, cf_copy = st.columns(2)
+                
+                with cf_exp:
+                    st.markdown("##### 📋 Export CSV")
+                    st.download_button("📥 Export Rejected (CSV)", failed.to_csv(index=False).encode('utf-8'), "rejected.csv", mime='text/csv')
+                
+                with cf_copy:
+                    st.markdown("##### 📋 Copy to Clipboard")
+                    if st.button("Get Google Sheets Format (TSV)", key="btn_tsv_rejected"):
+                        st.text_area("Full Data (Ctrl+A, Ctrl+C, then Paste into Google Sheets)", failed.to_csv(index=False, sep='\t'), height=150)
 
 # ==========================================
 # 4. MAIN NAVIGATION

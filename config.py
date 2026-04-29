@@ -78,3 +78,28 @@ def build_word_boundary_regex(keywords: list) -> re.Pattern:
     escaped = [re.escape(k) for k in keywords]
     pattern_string = r'\b(?:' + '|'.join(escaped) + r')s?\b'
     return re.compile(pattern_string, re.IGNORECASE)
+
+def build_pool_keyword_regex(keywords: list) -> re.Pattern:
+    """Creates an optimized regex for pool keywords, allowing partial matches for specific safe words."""
+    strict_parts = []
+    partial_parts = []
+    
+    # words that are safe for partial matching (e.g. bluetechpools, pooloptics)
+    partial_safe = ['pool', 'pools', 'poolside', 'poolman', 'aquatic', 'jacuzzi', 'gunite', 'shotcrete', 'fiberglass']
+    
+    for k in keywords:
+        if k.lower() in partial_safe:
+            partial_parts.append(re.escape(k))
+        else:
+            strict_parts.append(re.escape(k))
+            
+    parts = []
+    if strict_parts:
+        parts.append(r'\b(?:' + '|'.join(strict_parts) + r')s?\b')
+    if partial_parts:
+        # No word boundaries for these, so 'bluetechpools' matches 'pools'
+        parts.append(r'(?:' + '|'.join(partial_parts) + r')s?')
+        
+    pattern_string = '|'.join(parts)
+    return re.compile(pattern_string, re.IGNORECASE)
+

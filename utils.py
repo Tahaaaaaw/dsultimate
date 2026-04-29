@@ -50,13 +50,16 @@ def identify_platform(url):
 # ==========================================
 # 2. CSV PARSING & COLUMN DETECTION
 # ==========================================
-def safe_read_csv(file_obj) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
+def safe_read_csv(file_obj, has_header=True) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
     """Tries multiple encodings and handles bad lines gracefully."""
     encodings = ['utf-8', 'latin-1', 'iso-8859-1', 'cp1252']
+    header_val = "infer" if has_header else None
     for enc in encodings:
         try:
             file_obj.seek(0)
-            df = pd.read_csv(file_obj, encoding=enc, on_bad_lines='skip')
+            df = pd.read_csv(file_obj, encoding=enc, on_bad_lines='skip', header=header_val)
+            if not has_header and df is not None:
+                df.columns = [f"Column {i+1}" for i in range(len(df.columns))]
             if len(df.columns) > 1:
                 return df, None
         except Exception:
