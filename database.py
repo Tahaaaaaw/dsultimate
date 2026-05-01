@@ -44,10 +44,22 @@ def get_cached_result(website, max_age_days=7):
                 'website', 'business_name', 'Facebook', 'Instagram', 'Twitter', 
                 'LinkedIn', 'YouTube', 'TikTok', 'Pinterest', 'status', 'scraped_at'
             ]
-            data = dict(zip(columns, row))
-            scraped_at = datetime.fromisoformat(data['scraped_at'])
+            raw_data = dict(zip(columns, row))
+            scraped_at = datetime.fromisoformat(raw_data['scraped_at'])
             if datetime.now() - scraped_at < timedelta(days=max_age_days):
-                return data
+                # Normalize keys to match scraper engine output
+                return {
+                    "Website": raw_data['website'],
+                    "Business Name": raw_data['business_name'],
+                    "Facebook": raw_data['Facebook'],
+                    "Instagram": raw_data['Instagram'],
+                    "YouTube": raw_data['YouTube'],
+                    "Twitter": raw_data['Twitter'],
+                    "LinkedIn": raw_data['LinkedIn'],
+                    "TikTok": raw_data['TikTok'],
+                    "Pinterest": raw_data['Pinterest'],
+                    "Status": raw_data['status']
+                }
     except Exception as e:
         logging.error(f"Scraper DB Error: {e}")
     return None

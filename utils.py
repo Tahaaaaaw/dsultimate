@@ -1,5 +1,6 @@
 import pandas as pd
 import random
+import logging
 from typing import List, Tuple, Optional
 from urllib.parse import urlparse
 from config import USER_AGENTS, SOCIAL_DOMAINS
@@ -43,8 +44,8 @@ def identify_platform(url):
             if p_domain in domain:
                 if path in ["", "/"]: return None 
                 return platform
-    except:
-        pass
+    except Exception as e:
+        logging.warning(f"URL parsing error: {e}")
     return None
 
 # ==========================================
@@ -92,6 +93,6 @@ def smart_find_column(columns: List[str], target_type: str) -> int:
         for pt in targets:
             for idx, col in enumerate(cols_lower):
                 if pt in col: return idx
-        return max(1, min(1, len(cols_lower)-1))
+        return min(1, len(cols_lower)-1) if len(cols_lower) > 1 else 0
         
     return 0

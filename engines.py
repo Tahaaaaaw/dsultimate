@@ -92,7 +92,9 @@ class ScoringEngine:
         row['smart_score'] = score
         if score >= 0:
             row['Lead Type'] = self.categorize(uname, bio_t)
-        row['fail_reason'] = self.determine_failure_reason(uname, bio_t)
+            row['fail_reason'] = ""
+        else:
+            row['fail_reason'] = self.determine_failure_reason(uname, bio_t)
         return row
 
 # ==========================================
@@ -119,7 +121,9 @@ def extract_links_from_html(html, base_url):
                         s_as = item['sameAs']
                         if isinstance(s_as, str): found.add(s_as)
                         elif isinstance(s_as, list): found.update(s_as)
-        except: pass
+        except Exception as e:
+            logging.debug(f"JSON-LD parse error: {e}")
+            pass
     # 3. Aggressive Regex
     raw = re.findall(r'(?:https?:)?//(?:www\.)?(?:facebook\.com|fb\.com|instagram\.com|instagr\.am|youtube\.com)/[^"\'\s<>,;]+', html, re.IGNORECASE)
     found.update(raw)
@@ -145,11 +149,14 @@ async def fetch_fast(session, url):
     """Tier 1: Fast HTTP request."""
     for attempt in range(2):
         try:
-            async with session.get(url, headers=get_random_headers(), timeout=10, ssl=False, allow_redirects=True) as resp:
+            timeout = aiohttp.ClientTimeout(total=10)
+            async with session.get(url, headers=get_random_headers(), timeout=timeout, ssl=False, allow_redirects=True) as resp:
                 if resp.status == 200: return await resp.text(errors='replace'), resp.status, None
                 if resp.status in [403, 406, 503]: return "", resp.status, "Blocked"
-        except:
-            if attempt == 1: break
+        except Exception as e:
+            if attempt == 1: 
+                logging.warning(f"Fast fetch failed for {url}: {e}")
+                break
             await asyncio.sleep(1)
     return "", 0, "Failed"
 

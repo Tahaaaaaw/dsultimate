@@ -77,10 +77,10 @@ async def run_scraper_master(businesses, max_depth, concurrency):
         m_byp.metric("Bot Bypassed", bypc)
         if results:
             df_l = pd.DataFrame(results)
-            cols = ['Business Name', 'Website', 'Facebook', 'Instagram', 'YouTube', 'Tier Used']
+            cols = ['Business Name', 'Website', 'Facebook', 'Instagram', 'Tier Used']
             present = [c for c in cols if c in df_l.columns]
             df_disp = df_l[present].copy()
-            for c in ['Facebook', 'Instagram', 'YouTube']:
+            for c in ['Facebook', 'Instagram']:
                 if c in df_disp.columns: df_disp[c] = df_disp[c].apply(lambda x: "✅ Found" if x else "❌")
             table_p.dataframe(df_disp, use_container_width=True)
             
@@ -108,16 +108,14 @@ async def run_scraper_master(businesses, max_depth, concurrency):
             await browser.close()
     return results
 
-def render_scraper_view():
+def render_scraper_view(concurrency, max_depth):
     init_scraper_db()
     st.markdown("<div class='main-hero'><h1>⚡ Ultimate Social Scraper</h1><p>Hybrid Engine: Lightning Fast + Deep Rendering Anti-Bot Bypasses</p></div>", unsafe_allow_html=True)
     
     t_hub, t_cfg, t_db = st.tabs(["🎯 Extraction Hub", "⚙️ Settings", "🗄️ Cache Database"])
     
     with t_cfg:
-        c1, c2 = st.columns(2)
-        concurrency = c1.slider("Concurrent Connects", 1, 10, 5)
-        max_depth = c2.slider("Max Internal Pages", 1, 5, 3)
+        st.info("💡 Adjust scraper performance in the sidebar.")
         if st.button("🗑️ Purge Scraper Cache"):
             clear_scraper_cache()
             st.success("Cache cleared.")
@@ -160,16 +158,22 @@ def render_scraper_view():
                     st.success(f"Prepared {len(st.session_state.sc_list)} targets.")
                 if 'sc_list' in st.session_state: targets = st.session_state.sc_list
 
-        if targets:
             if st.button("🚀 IGNITE HUNTER ENGINE", type="primary", use_container_width=True):
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
-                st.session_state.sc_results = loop.run_until_complete(run_scraper_master(targets, max_depth, concurrency))
-                # Auto Save
-                rdf_save = pd.DataFrame(st.session_state.sc_results)
-                sv_name = f"auto_saved_leads_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-                rdf_save.to_csv(sv_name, index=False)
-                st.session_state.last_save = sv_name
+                try:
+                    st.session_state.sc_results = loop.run_until_complete(run_scraper_master(targets, max_depth, concurrency))
+                    
+                    # Auto Save to Exports Folder
+                    if st.session_state.sc_results:
+                        if not os.path.exists("exports"):
+                            os.makedirs("exports")
+                        rdf_save = pd.DataFrame(st.session_state.sc_results)
+                        sv_name = f"exports/leads_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+                        rdf_save.to_csv(sv_name, index=False)
+                        st.session_state.last_save = sv_name
+                finally:
+                    loop.close()
                 st.rerun()
 
     if 'sc_results' in st.session_state and st.session_state.sc_results:
@@ -192,7 +196,7 @@ def render_scraper_view():
             st.success(f"✅ Data automatically saved to your workspace as `{st.session_state.last_save}`")
 
         # Display Table with LinkColumns
-        cols_to_show = ['Business Name', 'Website', 'Facebook', 'Instagram', 'YouTube', 'Tier Used', 'Status']
+        cols_to_show = ['Business Name', 'Website', 'Facebook', 'Instagram', 'Tier Used', 'Status']
         present = [c for c in cols_to_show if c in res_df.columns]
         st.dataframe(
             res_df[present], 
@@ -200,8 +204,7 @@ def render_scraper_view():
             column_config={
                 "Website": st.column_config.LinkColumn(),
                 "Facebook": st.column_config.LinkColumn(),
-                "Instagram": st.column_config.LinkColumn(),
-                "YouTube": st.column_config.LinkColumn()
+                "Instagram": st.column_config.LinkColumn()
             }
         )
         
@@ -406,10 +409,14 @@ def main():
         st.title("🎯 Social Meta Suite")
         nav = st.radio("Navigation", ["⚡ Lead Extraction Hub", "🏊 Pool Lead Filter Suite"])
         st.divider()
+        st.header("⚙️ Scraper Settings")
+        concurrency = st.slider("Concurrent Connects", 1, 20, 5)
+        max_depth = st.slider("Max Internal Pages", 1, 10, 3)
+        st.divider()
         st.info("System Ready.")
 
     if nav == "⚡ Lead Extraction Hub":
-        render_scraper_view()
+        render_scraper_view(concurrency, max_depth)
     else:
         render_filter_view()
 
