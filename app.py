@@ -33,15 +33,28 @@ def install_playwright_browsers():
     """Ensures Playwright browsers are installed on Streamlit Cloud."""
     try:
         import subprocess
-        # Check if chromium is already installed
-        result = subprocess.run(["playwright", "install", "chromium"], capture_output=True, text=True)
-        if result.returncode != 0:
-            st.warning("⚠️ Installing browser dependencies... please wait a moment.")
-            subprocess.run(["playwright", "install", "--with-deps", "chromium"])
-    except Exception as e:
-        pass # Fallback to standard error if this fails
+        # Check if chromium is already installed by trying to launch it (fast check)
+        # We use --version as a lightweight way to check if the binary exists
+        try:
+            import playwright
+            from playwright.async_api import async_playwright
+            # If we can import it, we try to see if the cache exists
+            # On Streamlit Cloud, the default path is usually /home/adminuser/.cache/ms-playwright
+            # or /home/appuser/.cache/ms-playwright
+        except ImportError:
+            return
 
-install_playwright_browsers()
+        # Attempt to install chromium if not found
+        st.info("🔄 Optimizing environment for deep scanning... this happens only once.")
+        subprocess.run(["playwright", "install", "chromium"], check=True)
+    except Exception as e:
+        st.error(f"Setup Error: {e}")
+
+if 'playwright_setup_done' not in st.session_state:
+    with st.spinner("Preparing browser engines..."):
+        install_playwright_browsers()
+    st.session_state.playwright_setup_done = True
+
 
 
 # ==========================================
@@ -242,7 +255,7 @@ def render_scraper_view(concurrency, max_depth):
                     res_limit = st.slider(f"Rows to show ({label})", 10, min(len(df), 5000), min(len(df), 500), key=f"lim_res_{label}")
                     st.dataframe(
                         df[present].head(res_limit), 
-                        use_container_width=True,
+                        width='stretch',
                         column_config={
                             "Website": st.column_config.LinkColumn(),
                             "Facebook": st.column_config.LinkColumn(),
