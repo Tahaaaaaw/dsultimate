@@ -147,8 +147,8 @@ def render_scraper_view(concurrency, max_depth):
                     st.dataframe(df.head(3))
                     ncol, ucol = None, None
                     for c in df.columns:
-                    if any(x in str(c).lower() for x in ['name', 'company']) and not ncol: ncol = c
-                    if any(x in str(c).lower() for x in ['url', 'web', 'site']) and not ucol: ucol = c
+                        if any(x in str(c).lower() for x in ['name', 'company']) and not ncol: ncol = c
+                        if any(x in str(c).lower() for x in ['url', 'web', 'site']) and not ucol: ucol = c
                 sel_n = st.selectbox("Name Col:", df.columns, index=list(df.columns).index(ncol) if ncol else 0)
                 sel_u = st.selectbox("URL Col:", df.columns, index=list(df.columns).index(ucol) if ucol else 0)
                 if st.button("Prepare List"):
