@@ -28,6 +28,22 @@ except ImportError:
 
 nest_asyncio.apply()
 
+# --- Playwright Cloud Helper ---
+def install_playwright_browsers():
+    """Ensures Playwright browsers are installed on Streamlit Cloud."""
+    try:
+        import subprocess
+        # Check if chromium is already installed
+        result = subprocess.run(["playwright", "install", "chromium"], capture_output=True, text=True)
+        if result.returncode != 0:
+            st.warning("⚠️ Installing browser dependencies... please wait a moment.")
+            subprocess.run(["playwright", "install", "--with-deps", "chromium"])
+    except Exception as e:
+        pass # Fallback to standard error if this fails
+
+install_playwright_browsers()
+
+
 # ==========================================
 # 1. UI SETUP & STYLING
 # ==========================================
@@ -82,7 +98,8 @@ async def run_scraper_master(businesses, max_depth, concurrency):
             df_disp = df_l[present].copy()
             for c in ['Facebook', 'Instagram']:
                 if c in df_disp.columns: df_disp[c] = df_disp[c].apply(lambda x: "✅ Found" if x else "❌")
-            table_p.dataframe(df_disp, use_container_width=True)
+            # PERFORMANCE FIX: Only show last 100 leads in live feed to prevent lag
+            table_p.dataframe(df_disp.tail(100), use_container_width=True)
             
     update_ui()
     conn_tcp = aiohttp.TCPConnector(limit=concurrency * 2, ssl=False)
@@ -129,7 +146,8 @@ def render_scraper_view(concurrency, max_depth):
             conn = sqlite3.connect(SCRAPER_DB)
             df_c = pd.read_sql_query("SELECT * FROM leads", conn)
             conn.close()
-            st.dataframe(df_c, use_container_width=True)
+            st.info(f"Showing last 500 cached leads of {len(df_c)}")
+            st.dataframe(df_c.tail(500), use_container_width=True)
         except: st.warning("No cache table found.")
 
     with t_hub:
@@ -220,8 +238,10 @@ def render_scraper_view(concurrency, max_depth):
                 else:
                     cols_to_show = ['Business Name', 'Website', 'Facebook', 'Instagram', 'Tier Used', 'Status']
                     present = [c for c in cols_to_show if c in df.columns]
+                    # PERFORMANCE FIX: Limit result display
+                    res_limit = st.slider(f"Rows to show ({label})", 10, min(len(df), 5000), min(len(df), 500), key=f"lim_res_{label}")
                     st.dataframe(
-                        df[present], 
+                        df[present].head(res_limit), 
                         use_container_width=True,
                         column_config={
                             "Website": st.column_config.LinkColumn(),
@@ -229,7 +249,7 @@ def render_scraper_view(concurrency, max_depth):
                             "Instagram": st.column_config.LinkColumn()
                         }
                     )
-                    st.caption(f"Showing {len(df)} results")
+                    st.caption(f"Showing {res_limit} of {len(df)} results")
 
         display_result_tab(res_df, t_all, "All")
         display_result_tab(df_both, t_both, "Both FB & IG")
@@ -312,13 +332,17 @@ def render_filter_view():
                     pb.progress((i+1)/len(fls))
                 if apth:
                     mp = pd.concat(apth, ignore_index=True)
-                    if dedup: mp = mp.sort_values('smart_score', ascending=False).drop_duplicates(subset=[ucol], keep='first')
+                    raw_count = len(mp)
+                    if dedup: 
+                        mp = mp.sort_values('smart_score', ascending=False).drop_duplicates(subset=[ucol], keep='first')
+                    
                     st.session_state.filter_results = {
                         "passed": mp, 
                         "failed": pd.concat(afail, ignore_index=True), 
                         "stats": stats,
                         "u_col": ucol, 
-                        "b_col": bcol
+                        "b_col": bcol,
+                        "dupes_removed": raw_count - len(mp) if dedup else 0
                     }
                     save_filter_run(st.session_state.filter_results)
                     st.rerun()
@@ -329,10 +353,11 @@ def render_filter_view():
         failed = res['failed']
         
         st.divider()
-        m1, m2, m3 = st.columns(3)
+        m1, m2, m3, m4 = st.columns(4)
         m1.metric("✅ Qualified Leads", len(passed))
         m2.metric("❌ Filtered Out", len(failed))
         m3.metric("📊 Files Scanned", len(res['stats']))
+        m4.metric("♻️ Dupes Removed", res.get('dupes_removed', 0))
         
         # --- MASTER EXCEL EXPORT ---
         try:
@@ -378,12 +403,18 @@ def render_filter_view():
                         st.info(f"No leads in {name}.")
                     else:
                         extra_cols = [c for c in df.columns if c not in [res['u_col'], res['b_col'], 'smart_score', 'source_file', 'Lead Type', 'fail_reason']]
-                        
                         disp_cols = [res['u_col'], res['b_col']] + extra_cols + ['smart_score', 'source_file']
                         disp_cols = [c for c in disp_cols if c in df.columns]
                         
+                        # PERFORMANCE FIX: Add a row limit slider for the UI
+                        limit_key = f"limit_{name.replace(' ', '_')}"
+                        row_limit = st.slider(f"Rows to display ({name})", 10, min(len(df), 5000), min(len(df), 500), key=limit_key)
+                        
+                        if len(df) > row_limit:
+                            st.warning(f"⚠️ Showing first {row_limit} of {len(df)} leads for browser stability. Use Export buttons for full data.")
+
                         st.dataframe(
-                            df[disp_cols],
+                            df[disp_cols].head(row_limit),
                             use_container_width=True,
                             column_config={"smart_score": st.column_config.ProgressColumn("Score", format="%d", min_value=0, max_value=100)}
                         )
@@ -393,22 +424,22 @@ def render_filter_view():
                         
                         with col_exp:
                             st.markdown("##### 📋 Export CSV Options")
-                            st.download_button(f"📥 Export Full Data", df.to_csv(index=False).encode('utf-8'), f"{name}_full.csv", mime="text/csv", key=f"csv_f_{name}")
+                            st.download_button(f"📥 Export Full Data ({len(df)})", df.to_csv(index=False).encode('utf-8'), f"{name}_full.csv", mime="text/csv", key=f"csv_f_{name}")
                             if res['u_col'] in df.columns:
                                 st.download_button(f"📥 Export Usernames", df[[res['u_col']]].to_csv(index=False).encode('utf-8'), f"{name}_usernames.csv", mime="text/csv", key=f"csv_u_{name}")
-                            if res['b_col'] in df.columns:
-                                st.download_button(f"📥 Export Bios", df[[res['b_col']]].to_csv(index=False).encode('utf-8'), f"{name}_bios.csv", mime="text/csv", key=f"csv_b_{name}")
                         
                         with col_copy:
                             st.markdown("##### 📋 Copy to Clipboard")
-                            if st.button(f"Get Usernames", key=f"btn_u_{name}"):
-                                st.text_area("All Usernames (Ctrl+A to Copy)", "\n".join(df[res['u_col']].astype(str)), height=150)
-                            
-                            if st.button(f"Get All Bios", key=f"btn_b_{name}"):
-                                st.text_area("All Bios (Ctrl+A to Copy)", "\n".join(df[res['b_col']].astype(str)), height=150)
+                            if len(df) > 10000:
+                                st.info("💡 Dataset too large for browser copy. Please use Export buttons.")
+                            else:
+                                if st.button(f"Get Usernames (Preview)", key=f"btn_u_{name}"):
+                                    st.text_area("Top Usernames (Ctrl+A to Copy)", "\n".join(df[res['u_col']].astype(str).head(1000)), height=150)
+                                    if len(df) > 1000: st.warning("Showing top 1000 for stability. Export CSV for all.")
                                 
-                            if st.button(f"Get Google Sheets Format (TSV)", key=f"btn_tsv_{name}"):
-                                st.text_area("Full Data (Ctrl+A, Ctrl+C, then Paste into Google Sheets)", df.to_csv(index=False, sep='\t'), height=150)
+                                if st.button(f"Get TSV for Sheets (Preview)", key=f"btn_tsv_{name}"):
+                                    st.text_area("Full Data Preview (Ctrl+A, Ctrl+C)", df.head(1000).to_csv(index=False, sep='\t'), height=150)
+                                    if len(df) > 1000: st.warning("Showing top 1000 for stability. Export CSV for all.")
             
             for val, target_tab in categories:
                 render_lead_table(passed[passed['Lead Type'] == val], target_tab, val)
@@ -421,19 +452,21 @@ def render_filter_view():
                 disp_cols_failed = [res['u_col'], res['b_col']] + extra_cols_failed + ['fail_reason', 'smart_score', 'source_file']
                 disp_cols_failed = [c for c in disp_cols_failed if c in failed.columns]
                 
-                st.dataframe(failed[disp_cols_failed], use_container_width=True)
+                # PERFORMANCE FIX: Limit rejected leads display
+                fail_limit = st.slider("Rejected Rows to display", 10, min(len(failed), 5000), min(len(failed), 500), key="lim_fail")
+                st.dataframe(failed[disp_cols_failed].head(fail_limit), use_container_width=True)
                 
                 st.markdown("<br>", unsafe_allow_html=True)
                 cf_exp, cf_copy = st.columns(2)
                 
                 with cf_exp:
                     st.markdown("##### 📋 Export CSV")
-                    st.download_button("📥 Export Rejected (CSV)", failed.to_csv(index=False).encode('utf-8'), "rejected.csv", mime='text/csv')
+                    st.download_button(f"📥 Export Rejected ({len(failed)})", failed.to_csv(index=False).encode('utf-8'), "rejected.csv", mime='text/csv')
                 
                 with cf_copy:
                     st.markdown("##### 📋 Copy to Clipboard")
-                    if st.button("Get Google Sheets Format (TSV)", key="btn_tsv_rejected"):
-                        st.text_area("Full Data (Ctrl+A, Ctrl+C, then Paste into Google Sheets)", failed.to_csv(index=False, sep='\t'), height=150)
+                    if st.button("Get Rejected TSV (Preview)", key="btn_tsv_rejected"):
+                        st.text_area("Rejected TSV Preview", failed.head(1000).to_csv(index=False, sep='\t'), height=150)
 
 # ==========================================
 # 4. MAIN NAVIGATION
