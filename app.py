@@ -95,13 +95,17 @@ async def run_scraper_master(businesses, max_depth, concurrency):
                     try:
                         res = await crawl_site_coordinator(session, browser, b_name, b_url, max_depth)
                         results.append(res)
-                        pbar.progress(len(results) / tot)
-                        t_icon = "🚀" if res['Tier Used'] == 'Fast (aiohttp)' else ("🛡️" if res['Tier Used'] == 'Deep (Playwright)' else "🗄️")
-                        log_c.info(f"{t_icon} **Live Action:** `{b_name}` via **{res['Tier Used']}**")
-                        update_ui()
+                        
+                        # Performance Optimization: Batch UI updates for large runs
+                        # Only update UI every 5 leads or at the very end
+                        if len(results) % 5 == 0 or len(results) == tot:
+                            pbar.progress(len(results) / tot)
+                            t_icon = "🚀" if res['Tier Used'] == 'Fast (aiohttp)' else ("🛡️" if res['Tier Used'] == 'Deep (Playwright)' else "🗄️")
+                            log_c.info(f"{t_icon} **Live Action:** `{b_name}` via **{res['Tier Used']}** | Total: `{len(results)}/{tot}`")
+                            update_ui()
                     except Exception as e:
                         results.append({"Business Name": b_name, "Website": b_url, "Status": f"Error: {str(e)[:20]}", "Tier Used": "Failed"})
-                        update_ui()
+                        if len(results) % 5 == 0: update_ui()
             
             tasks = [asyncio.create_task(bounded_crawl(n, u, len(businesses))) for n, u in businesses]
             await asyncio.gather(*tasks)
@@ -194,18 +198,45 @@ def render_scraper_view(concurrency, max_depth):
         if 'last_save' in st.session_state:
             st.success(f"✅ Data automatically saved to your workspace as `{st.session_state.last_save}`")
 
-        # Display Table with LinkColumns
-        cols_to_show = ['Business Name', 'Website', 'Facebook', 'Instagram', 'Tier Used', 'Status']
-        present = [c for c in cols_to_show if c in res_df.columns]
-        st.dataframe(
-            res_df[present], 
-            use_container_width=True,
-            column_config={
-                "Website": st.column_config.LinkColumn(),
-                "Facebook": st.column_config.LinkColumn(),
-                "Instagram": st.column_config.LinkColumn()
-            }
-        )
+        # Filtering logic
+        df_both = res_df[(res_df['Facebook'] != "") & (res_df['Instagram'] != "")]
+        df_fb = res_df[(res_df['Facebook'] != "") & (res_df['Instagram'] == "")]
+        df_ig = res_df[(res_df['Facebook'] == "") & (res_df['Instagram'] != "")]
+        df_none = res_df[(res_df['Facebook'] == "") & (res_df['Instagram'] == "")]
+
+        # --- Categorized Tabs ---
+        t_all, t_both, t_fb, t_ig, t_none = st.tabs([
+            f"📊 All ({len(res_df)})", 
+            f"💎 Both ({len(df_both)})", 
+            f"🔵 FB Only ({len(df_fb)})", 
+            f"📸 IG Only ({len(df_ig)})", 
+            f"❌ None ({len(df_none)})"
+        ])
+        
+        def display_result_tab(df, tab, label):
+            with tab:
+                if df.empty:
+                    st.info(f"No leads in '{label}' category.")
+                else:
+                    cols_to_show = ['Business Name', 'Website', 'Facebook', 'Instagram', 'Tier Used', 'Status']
+                    present = [c for c in cols_to_show if c in df.columns]
+                    st.dataframe(
+                        df[present], 
+                        use_container_width=True,
+                        column_config={
+                            "Website": st.column_config.LinkColumn(),
+                            "Facebook": st.column_config.LinkColumn(),
+                            "Instagram": st.column_config.LinkColumn()
+                        }
+                    )
+                    st.caption(f"Showing {len(df)} results")
+
+        display_result_tab(res_df, t_all, "All")
+        display_result_tab(df_both, t_both, "Both FB & IG")
+        display_result_tab(df_fb, t_fb, "Facebook Only")
+        display_result_tab(df_ig, t_ig, "Instagram Only")
+        display_result_tab(df_none, t_none, "None Found")
+
         
         # Export Actions
         c_exp1, c_exp2 = st.columns(2)
