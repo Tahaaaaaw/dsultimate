@@ -7,8 +7,7 @@ SOCIAL_DOMAINS = {
     "facebook.com": "Facebook",
     "fb.com": "Facebook",
     "instagram.com": "Instagram",
-    "instagr.am": "Instagram",
-    "youtube.com": "YouTube"
+    "instagr.am": "Instagram"
 }
 
 USER_AGENTS = [
@@ -97,8 +96,10 @@ def build_pool_keyword_regex(keywords: list) -> re.Pattern:
     if strict_parts:
         parts.append(r'\b(?:' + '|'.join(strict_parts) + r')s?\b')
     if partial_parts:
-        # No word boundaries for these, so 'bluetechpools' matches 'pools'
-        parts.append(r'(?:' + '|'.join(partial_parts) + r')s?')
+        # Use lookbehind to avoid common false positives like 'liverpool', 'deadpool', 'whirlpool'
+        # but allow them if they are at the start of a word or preceded by a non-letter
+        pattern = r'(?<!liver)(?<!dead)(?<!whirl)(?:' + '|'.join(partial_parts) + r')s?'
+        parts.append(pattern)
         
     pattern_string = '|'.join(parts)
     return re.compile(pattern_string, re.IGNORECASE)

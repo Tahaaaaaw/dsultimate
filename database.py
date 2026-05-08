@@ -4,6 +4,7 @@ import json
 import io
 import logging
 import pandas as pd
+from utils import normalize_url
 from datetime import datetime, timedelta
 
 SCRAPER_DB = "scraper_cache.db"
@@ -33,6 +34,7 @@ def init_scraper_db():
 
 def get_cached_result(website, max_age_days=7):
     try:
+        website = normalize_url(website)
         conn = sqlite3.connect(SCRAPER_DB)
         c = conn.cursor()
         c.execute("SELECT * FROM leads WHERE website=?", (website,))
@@ -69,10 +71,11 @@ def save_to_cache(data):
         conn = sqlite3.connect(SCRAPER_DB)
         c = conn.cursor()
         now = datetime.now().isoformat()
+        website = normalize_url(data['Website'])
         c.execute('''INSERT OR REPLACE INTO leads 
                      (website, business_name, Facebook, Instagram, Twitter, LinkedIn, YouTube, TikTok, Pinterest, status, scraped_at) 
                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''', 
-                  (data['Website'], data['Business Name'], 
+                  (website, data['Business Name'], 
                    data.get('Facebook', ''), data.get('Instagram', ''), 
                    data.get('Twitter', ''), data.get('LinkedIn', ''),
                    data.get('YouTube', ''), data.get('TikTok', ''),

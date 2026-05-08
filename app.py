@@ -142,12 +142,11 @@ def render_scraper_view(concurrency, max_depth):
             up = st.file_uploader("Upload CSV", type=['csv'], key="sc_up")
             if up:
                 has_header = st.checkbox("CSV has a header row", value=True, key="sc_has_header")
-                df = pd.read_csv(up, header=0 if has_header else None)
-                if not has_header:
-                    df.columns = [f"Column {i+1}" for i in range(len(df.columns))]
-                st.dataframe(df.head(3))
-                ncol, ucol = None, None
-                for c in df.columns:
+                df, err = safe_read_csv(up, has_header)
+                if df is not None:
+                    st.dataframe(df.head(3))
+                    ncol, ucol = None, None
+                    for c in df.columns:
                     if any(x in str(c).lower() for x in ['name', 'company']) and not ncol: ncol = c
                     if any(x in str(c).lower() for x in ['url', 'web', 'site']) and not ucol: ucol = c
                 sel_n = st.selectbox("Name Col:", df.columns, index=list(df.columns).index(ncol) if ncol else 0)
@@ -263,7 +262,12 @@ def render_filter_view():
                 for i, f in enumerate(fls):
                     df, _ = safe_read_csv(f, has_header)
                     if df is not None:
-                        df = df.apply(lambda r: engine.process_row(r, ucol, bcol), axis=1)
+                        # Dynamic Column Mapping per file to avoid KeyError
+                        current_cols = df.columns.tolist()
+                        f_ucol = ucol if ucol in current_cols else current_cols[smart_find_column(current_cols, "username")]
+                        f_bcol = bcol if bcol in current_cols else current_cols[smart_find_column(current_cols, "bio")]
+                        
+                        df = df.apply(lambda r: engine.process_row(r, f_ucol, f_bcol), axis=1)
                         msk = df['smart_score'] >= min_s
                         p, fl = df[msk].copy(), df[~msk].copy()
                         p['source_file'], fl['source_file'] = f.name, f.name

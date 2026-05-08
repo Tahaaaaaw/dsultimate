@@ -61,9 +61,10 @@ class ScoringEngine:
         if self._has_match(self.re_business, username): score += FILTER_WEIGHTS["BUSINESS_ENTITY_USERNAME"]
         if self._has_match(self.re_general, bio): score += FILTER_WEIGHTS["GENERAL_TITLE_BIO"]
         
-        # 3. ABSOLUTE PENALTY: No Industry Signal && No Phone = JUNK (-50)
-        if not has_industry and not has_phone:
-            score -= 50
+        # 3. INDUSTRY ENFORCEMENT
+        if not has_industry:
+            if not has_phone: return -1 # No industry AND no phone = Absolute Junk
+            score -= 35 # Heavy penalty if no pool keywords are present
             
         return score
 
@@ -124,8 +125,8 @@ def extract_links_from_html(html, base_url):
         except Exception as e:
             logging.debug(f"JSON-LD parse error: {e}")
             pass
-    # 3. Aggressive Regex
-    raw = re.findall(r'(?:https?:)?//(?:www\.)?(?:facebook\.com|fb\.com|instagram\.com|instagr\.am|youtube\.com)/[^"\'\s<>,;]+', html, re.IGNORECASE)
+    # 3. Aggressive Regex (Refined for FB/IG Profiles)
+    raw = re.findall(r'(?:https?:)?//(?:www\.)?(?:facebook\.com|fb\.com|instagram\.com|instagr\.am)/(?!(?:tr|ads|sharer|login|p|reel|stories|policy|developer)/)[a-zA-Z0-9.]{3,}/?', html, re.IGNORECASE)
     found.update(raw)
     
     # Filter & Categorize
@@ -189,7 +190,10 @@ async def crawl_site_coordinator(session, browser, biz_name, base_url, max_depth
     visited, queue = set(), [base_url]
     for p in ['/contact', '/about']: queue.append(urljoin(base_url, p))
     
-    tier_u, p_crawl, status = "Fast (aiohttp)", 0, 0
+    tier_u, p_crawl, last_status = "Fast (aiohttp)", 0, 200
+    any_success = False
+    is_blocked = False
+
     while queue and p_crawl < max_depth:
         curr = queue.pop(0)
         if curr in visited: continue
@@ -201,21 +205,34 @@ async def crawl_site_coordinator(session, browser, biz_name, base_url, max_depth
             if browser:
                 tier_u = "Deep (Playwright)"
                 html, status, err = await fetch_deep(browser, curr)
-                
+        
+        last_status = status
+        if status == 200: any_success = True
+        if status in [403, 406, 503]: is_blocked = True
+
         if not html: continue
         socials, internals = extract_links_from_html(html, curr)
         for plt, lnks in socials.items():
-            if lnks and not final_s[plt]: final_s[plt] = lnks[0]
+            if lnks and not final_s[plt]: 
+                final_s[plt] = lnks[0]
             
-        if final_s["Facebook"] and final_s["Instagram"]: break
+        # Stop early if we have BOTH Facebook and Instagram
+        if final_s.get("Facebook") and final_s.get("Instagram"): 
+            any_success = True # Found what we needed
+            break
+
         for l in internals:
             if l not in visited and len(queue) < 15:
-                if any(x in l.lower() for x in ['contact', 'about', 'connect', 'footer']): queue.insert(0, l)
+                if any(x in l.lower() for x in ['contact', 'about', 'connect', 'footer']): 
+                    queue.append(l) # Append instead of insert(0) to ensure breadth-ish crawl
+
+    # Determine final status accurately
+    final_status = "Success" if (final_s.get("Facebook") or final_s.get("Instagram")) else ("Blocked" if is_blocked and not any_success else "Not Found")
 
     res = {
         "Business Name": biz_name, "Website": base_url, 
         "Facebook": final_s.get("Facebook", ""), "Instagram": final_s.get("Instagram", ""), 
-        "YouTube": final_s.get("YouTube", ""), "Status": "Blocked" if status in [403, 406, 503] else "Success", 
+        "Status": final_status, 
         "Tier Used": tier_u
     }
     save_to_cache(res)

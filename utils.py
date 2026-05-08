@@ -28,6 +28,16 @@ def clean_social_url(url):
         url = url.split('?')[0]
     return url.rstrip('/')
 
+def normalize_url(url):
+    """Normalizes a URL for consistent database matching."""
+    if not url: return ""
+    url = url.lower().strip().rstrip('/')
+    if url.startswith('http://'): url = url.replace('http://', 'https://', 1)
+    if 'www.' not in url and '://' in url:
+        parts = url.split('://', 1)
+        url = f"{parts[0]}://www.{parts[1]}"
+    return url
+
 def identify_platform(url):
     """Categorizes a URL into a social platform if it matches."""
     try:
