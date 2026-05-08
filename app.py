@@ -30,30 +30,21 @@ nest_asyncio.apply()
 
 # --- Playwright Cloud Helper ---
 def install_playwright_browsers():
-    """Ensures Playwright browsers are installed on Streamlit Cloud."""
+    """Ensures Playwright browsers and system dependencies are installed."""
     try:
         import subprocess
-        # Check if chromium is already installed by trying to launch it (fast check)
-        # We use --version as a lightweight way to check if the binary exists
-        try:
-            import playwright
-            from playwright.async_api import async_playwright
-            # If we can import it, we try to see if the cache exists
-            # On Streamlit Cloud, the default path is usually /home/adminuser/.cache/ms-playwright
-            # or /home/appuser/.cache/ms-playwright
-        except ImportError:
-            return
-
-        # Attempt to install chromium if not found
-        st.info("🔄 Optimizing environment for deep scanning... this happens only once.")
-        subprocess.run(["playwright", "install", "chromium"], check=True)
+        # On Streamlit Cloud, we need to ensure the browser exists
+        # We'll use the 'playwright install' command which handles both the binary and system deps
+        st.info("🛠️ Configuring scan engines... this may take a moment on first launch.")
+        subprocess.run(["playwright", "install", "--with-deps", "chromium"], check=True)
     except Exception as e:
-        st.error(f"Setup Error: {e}")
+        st.error(f"Setup Warning (System libraries may be missing): {e}")
 
 if 'playwright_setup_done' not in st.session_state:
-    with st.spinner("Preparing browser engines..."):
+    with st.spinner("Preparing deep-scan environment..."):
         install_playwright_browsers()
     st.session_state.playwright_setup_done = True
+
 
 
 
@@ -112,7 +103,7 @@ async def run_scraper_master(businesses, max_depth, concurrency):
             for c in ['Facebook', 'Instagram']:
                 if c in df_disp.columns: df_disp[c] = df_disp[c].apply(lambda x: "✅ Found" if x else "❌")
             # PERFORMANCE FIX: Only show last 100 leads in live feed to prevent lag
-            table_p.dataframe(df_disp.tail(100), use_container_width=True)
+            table_p.dataframe(df_disp.tail(100), width='stretch')
             
     update_ui()
     conn_tcp = aiohttp.TCPConnector(limit=concurrency * 2, ssl=False)
@@ -160,7 +151,7 @@ def render_scraper_view(concurrency, max_depth):
             df_c = pd.read_sql_query("SELECT * FROM leads", conn)
             conn.close()
             st.info(f"Showing last 500 cached leads of {len(df_c)}")
-            st.dataframe(df_c.tail(500), use_container_width=True)
+            st.dataframe(df_c.tail(500), width='stretch')
         except: st.warning("No cache table found.")
 
     with t_hub:
@@ -428,7 +419,7 @@ def render_filter_view():
 
                         st.dataframe(
                             df[disp_cols].head(row_limit),
-                            use_container_width=True,
+                            width='stretch',
                             column_config={"smart_score": st.column_config.ProgressColumn("Score", format="%d", min_value=0, max_value=100)}
                         )
                         
@@ -467,7 +458,7 @@ def render_filter_view():
                 
                 # PERFORMANCE FIX: Limit rejected leads display
                 fail_limit = st.slider("Rejected Rows to display", 10, min(len(failed), 5000), min(len(failed), 500), key="lim_fail")
-                st.dataframe(failed[disp_cols_failed].head(fail_limit), use_container_width=True)
+                st.dataframe(failed[disp_cols_failed].head(fail_limit), width='stretch')
                 
                 st.markdown("<br>", unsafe_allow_html=True)
                 cf_exp, cf_copy = st.columns(2)
