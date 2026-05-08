@@ -30,15 +30,15 @@ nest_asyncio.apply()
 
 # --- Playwright Cloud Helper ---
 def install_playwright_browsers():
-    """Ensures Playwright browsers and system dependencies are installed."""
+    """Ensures Playwright browsers are installed."""
     try:
         import subprocess
-        # On Streamlit Cloud, we need to ensure the browser exists
-        # We'll use the 'playwright install' command which handles both the binary and system deps
-        st.info("🛠️ Configuring scan engines... this may take a moment on first launch.")
-        subprocess.run(["playwright", "install", "--with-deps", "chromium"], check=True)
+        # On Streamlit Cloud, we can't use --with-deps at runtime (no sudo).
+        # We rely on packages.txt for system deps and only install the binary here.
+        subprocess.run(["playwright", "install", "chromium"], check=True)
     except Exception as e:
-        st.error(f"Setup Warning (System libraries may be missing): {e}")
+        st.warning(f"Note: Deep-scan browser setup is still processing. If 'Deep' mode fails, please check your project's 'packages.txt'.")
+
 
 if 'playwright_setup_done' not in st.session_state:
     with st.spinner("Preparing deep-scan environment..."):
@@ -197,6 +197,11 @@ def render_scraper_view(concurrency, max_depth):
                         sv_name = f"exports/leads_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
                         rdf_save.to_csv(sv_name, index=False)
                         st.session_state.last_save = sv_name
+                except Exception as e:
+                    if "Executable doesn't exist" in str(e) or "playwright install" in str(e).lower():
+                        st.error("🚨 **Deep Engine Not Ready**: The browser engine hasn't finished installing on the server yet. Please wait 1 minute and try again. If it keeps happening, check your `packages.txt`.")
+                    else:
+                        st.error(f"Scraper Error: {e}")
                 finally:
                     loop.close()
                 st.rerun()
